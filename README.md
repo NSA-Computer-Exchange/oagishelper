@@ -1,3 +1,14 @@
+# Quick Start (TUG Attendees)
+
+1. Click "Code"
+2. Download ZIP (no Git required)
+
+OR
+
+git clone https://github.com/NSA-Computer-Exchange/oagishelper
+
+---
+
 # oagishelper
 
 A Python `xml.etree.ElementTree` wrapper for working with OAGIS BOD XML documents. Provides namespace-transparent XPath queries, convenience value accessors, and helpers for building and modifying BOD structures.
