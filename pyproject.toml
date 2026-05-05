@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oagishelper"
+version = "0.1.0"
+description = "ElementTree wrapper for working with OAGIS BODs."
+requires-python = ">=3.8"
+dependencies = []

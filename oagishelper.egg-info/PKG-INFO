@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: oagishelper
+Version: 0.1.0
+Summary: ElementTree wrapper for working with OAGIS BODs.
+Requires-Python: >=3.8
