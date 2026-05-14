@@ -5,7 +5,7 @@
 
 OR
 
-git clone https://github.com/NSA-Computer-Exchange/oagishelper
+git clone https://github.com/NSA-Computer-Exchange/oagishelper  
 git remote remove origin
 
 ---
