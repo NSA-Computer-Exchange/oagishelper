@@ -71,12 +71,14 @@ h = OagisHelper(xml_string, strip_ns=True)
 
 ---
 
-#### `OagisHelper.fromstring(xml, strip_ns=False)` — classmethod
-Equivalent to `OagisHelper(xml, strip_ns)`. Returns an `OagisHelper` instance.
+#### `fromstring(xml, strip_ns=False)`
+Load XML into an existing instance, or chain on a new one. Returns `self`.
 
 ```python
-h = OagisHelper.fromstring(xml_string)
-h = OagisHelper.fromstring(xml_string, strip_ns=True)
+h = OagisHelper()
+h.fromstring(xml_string)               # load into existing instance
+
+h = OagisHelper().fromstring(xml_string)  # create and load in one step
 ```
 
 ---
@@ -114,7 +116,7 @@ h = OagisHelper.frombod(
         "AccountingEntity": "100",
         "actionCode": "Add",
     },
-    namespaces={"xmlns": "http://schema.infor.com/InforOAGIS/2"}
+    namespaces={"": "http://schema.infor.com/InforOAGIS/2", "xsi": "http://www.w3.org/2001/XMLSchema-instance"}
 )
 ```
 
@@ -183,10 +185,12 @@ tenant     = h.find_value("DataArea/Sync/TenantID", default="UNKNOWN")
 ---
 
 #### `findall(xpath)`
-Return a list of all `Element` objects matching the XPath. Returns `[]` if none found. Namespace-transparent.
+Return a list of `OagisHelper` objects wrapping each matching element. Returns `[]` if none found. Namespace-transparent. Each result supports all `OagisHelper` methods (`find_value`, `element_set`, etc.) relative to the matched element.
 
 ```python
 lines = h.findall("DataArea/SalesOrder/SalesOrderLine")
+for line in lines:
+    print(line.find_value("LineNumber"), line.find_value("Quantity"))
 ```
 
 ---
@@ -213,11 +217,20 @@ release_id = h.attribute_get("DataArea/SalesOrder/@releaseID")
 
 ### Modifying Elements
 
-#### `element_set(xpath, value)`
-Set the text content of an existing element. Returns `True` on success, `False` if the element is not found.
+#### `element_set(xpath, value, create=False, create_parents=True)`
+Set the text content of an element. Returns `True` on success, `False` if the element is not found (or a parent is missing when `create_parents=False`).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `xpath` | `str` | Full path to the element. |
+| `value` | `str` | Text content to set. |
+| `create` | `bool` | If `True`, create the element when it does not exist. Default `False`. |
+| `create_parents` | `bool` | If `True` (default), create any missing parent elements when `create=True`. If `False`, returns `False` when a parent is missing. Ignored when `create=False`. |
 
 ```python
 h.element_set("ApplicationArea/BODID", "new-bod-id")
+h.element_set("DataArea/SalesOrder/OrderHeader", "HDR-001", create=True)
+h.element_set("DataArea/SalesOrder/OrderHeader", "HDR-001", create=True, create_parents=False)
 ```
 
 ---
@@ -231,18 +244,28 @@ h.element_tag("DataArea/OldName", "NewName")
 
 ---
 
-#### `element_create(xpath, value=None, attrs=None)`
-Create a new element at the given path. Any missing parent elements are created automatically. The final element is always created (even if a sibling with the same tag exists). All path segments must be valid XML element names. Returns `True` on success, `False` on invalid path or if no XML is loaded.
+#### `element_create(xpath, value=None, attrs=None, create_parents=True)`
+Create a new element at the given path. The final element is always created (even if a sibling with the same tag exists). All path segments must be valid XML element names. Returns an `OagisHelper` wrapping the new element on success, or `None` on failure (invalid path, missing parent when `create_parents=False`, or no XML loaded). The returned instance is falsy on failure and truthy on success.
+
+Supports `.//anchor/child` search-style paths: the anchor element is located anywhere in the tree and the remaining path is created beneath it.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `xpath` | `str` | Full path to the new element. |
+| `xpath` | `str` | Full path to the new element. Supports `.//anchor/remaining` search paths. |
 | `value` | `str` | Optional text content. |
 | `attrs` | `dict` | Optional attributes to set. |
+| `create_parents` | `bool` | If `True` (default), any missing parent elements are created automatically. If `False`, returns `None` when a parent is missing. |
 
 ```python
+# Simple path
 h.element_create("DataArea/SalesOrder/OrderHeader", value="HDR-001")
-h.element_create("DataArea/SalesOrder/OrderHeader", attrs={"type": "standard"})
+
+# Search-style path — creates line under the existing SupplierInvoice element
+line = h.element_create(".//SupplierInvoice/SupplierInvoiceLine")
+if line:
+    line.element_set("LineNumber", "1", create=True)
+    line.element_set("Quantity", "125", create=True)
+    line.element_set("Description", "FLEX-OIL DELIVERY", create=True)
 ```
 
 ---
@@ -280,10 +303,11 @@ h.attribute_delete("DataArea/SalesOrder", ["releaseID", "languageCode"])
 
 | Type | Meaning |
 |---|---|
-| `OagisHelper` | Returned by `fromstring` and `frombod` on success |
-| `None` | Returned by `frombod` if `verb` or `noun` are invalid XML names |
+| `OagisHelper` (truthy) | Returned by `fromstring`, `frombod`, and `element_create` on success |
+| `None` / falsy | Returned by `frombod` and `element_create` on failure |
 | `str` | Returned by `find_value`, `tostring` |
-| `list` | Returned by `findall`, `findall_values` |
+| `list[OagisHelper]` | Returned by `findall` |
+| `list[str]` | Returned by `findall_values` |
 | `Element` | Returned by `find` |
-| `True` | Operation succeeded |
+| `True` | Operation succeeded (`element_set`, `attribute_set`, etc.) |
 | `False` | Operation failed (element not found, invalid name, etc.) |

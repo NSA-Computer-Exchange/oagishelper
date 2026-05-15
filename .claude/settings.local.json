@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(py -m build --wheel)",
+      "PowerShell(py test_element_set.py)",
+      "PowerShell(py test_frombod.py)",
+      "PowerShell(py test_create.py)",
+      "PowerShell(py test_create_dup.py)",
+      "PowerShell(py test_findall.py)",
+      "PowerShell(py test_lineitems.py)"
+    ]
+  }
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oagishelper"
-version = "0.1.0"
+version = "0.1.4"
 description = "ElementTree wrapper for working with OAGIS BODs."
 requires-python = ">=3.8"
 dependencies = []

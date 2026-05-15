@@ -43,13 +43,21 @@ class OagisHelper:
             if self._root.tag.startswith(f"{{{self._INFOR_NS}}}"):
                 self._ns = self._INFOR_NS
 
-    @classmethod
-    def fromstring(cls, xml: str, strip_ns: bool = False) -> "OagisHelper":
-        return cls(xml, strip_ns)
+    def __bool__(self) -> bool:
+        return self._root is not None
+
+    def fromstring(self, xml: str, strip_ns: bool = False) -> "OagisHelper":
+        if strip_ns:
+            xml = xml.replace(self._INFOR_NS_ATTR, "")
+        self._root = ET.fromstring(xml)
+        self._ns = self._INFOR_NS if self._root.tag.startswith(f"{{{self._INFOR_NS}}}") else None
+        return self
 
     def tostring(self, encoding: str = "unicode", xml_declaration: bool = False) -> str:
         if self._root is None:
             return ""
+        if self._ns:
+            ET.register_namespace("", self._ns)
         result = ET.tostring(self._root, encoding=encoding, method="xml")
         if xml_declaration:
             result = '<?xml version="1.0" encoding="utf-8"?>\n' + result
@@ -73,10 +81,16 @@ class OagisHelper:
             return []
         if self._ns:
             xpath = _ns_xpath(xpath, self._ns)
-        return self._root.findall(xpath)
+        results = []
+        for elem in self._root.findall(xpath):
+            instance = OagisHelper()
+            instance._root = elem
+            instance._ns = self._ns
+            results.append(instance)
+        return results
 
     def findall_values(self, xpath: str, default: str = "") -> list:
-        return [e.text if e.text is not None else default for e in self.findall(xpath)]
+        return [e._root.text if e._root.text is not None else default for e in self.findall(xpath)]
 
     def attribute_get(self, xpath: str) -> Optional[str]:
         if "/@" not in xpath:
@@ -113,27 +127,68 @@ class OagisHelper:
         element.tag = f"{{{self._ns}}}{tag}" if self._ns else tag
         return True
 
-    def element_set(self, xpath: str, value: str) -> bool:
+    def element_set(self, xpath: str, value: str, create: bool = False, create_parents: bool = True) -> bool:
         element = self.find(xpath)
         if element is None:
-            return False
+            if not create:
+                return False
+            if '//' in xpath:
+                if '/' not in xpath:
+                    return False
+                parent_xpath, leaf_tag = xpath.rsplit('/', 1)
+                if not _valid_xml_name(leaf_tag):
+                    return False
+                parent = self.find(parent_xpath)
+                if parent is None:
+                    return False
+                ns_tag = f"{{{self._ns}}}{leaf_tag}" if self._ns else leaf_tag
+                element = ET.SubElement(parent, ns_tag)
+            else:
+                segments = xpath.split("/")
+                if not all(_valid_xml_name(seg) for seg in segments):
+                    return False
+                ns_segments = [f"{{{self._ns}}}{seg}" for seg in segments] if self._ns else segments
+                current = self._root
+                for tag in ns_segments[:-1]:
+                    child = current.find(tag)
+                    if child is None:
+                        if not create_parents:
+                            return False
+                        child = ET.SubElement(current, tag)
+                    current = child
+                element = ET.SubElement(current, ns_segments[-1])
         element.text = str(value)
         return True
 
-    def element_create(self, xpath: str, value: Optional[str] = None, attrs: Optional[dict] = None) -> bool:
+    def element_create(self, xpath: str, value: Optional[str] = None, attrs: Optional[dict] = None, create_parents: bool = True) -> Optional["OagisHelper"]:
         if not xpath or self._root is None:
-            return False
+            return None
 
-        segments = xpath.split("/")
-        if not all(_valid_xml_name(seg) for seg in segments):
-            return False
+        if '//' in xpath:
+            search_part, _, create_part = xpath.partition('//')
+            anchor_tag, _, remaining = create_part.partition('/')
+            if not _valid_xml_name(anchor_tag) or not remaining:
+                return None
+            anchor = self.find(f"{search_part}//{anchor_tag}")
+            if anchor is None:
+                return None
+            segments = remaining.split("/")
+            if not all(_valid_xml_name(seg) for seg in segments):
+                return None
+            ns_segments = [f"{{{self._ns}}}{seg}" for seg in segments] if self._ns else segments
+            current = anchor
+        else:
+            segments = xpath.split("/")
+            if not all(_valid_xml_name(seg) for seg in segments):
+                return None
+            ns_segments = [f"{{{self._ns}}}{seg}" for seg in segments] if self._ns else segments
+            current = self._root
 
-        ns_segments = [f"{{{self._ns}}}{seg}" for seg in segments] if self._ns else segments
-
-        current = self._root
         for tag in ns_segments[:-1]:
             child = current.find(tag)
             if child is None:
+                if not create_parents:
+                    return None
                 child = ET.SubElement(current, tag)
             current = child
 
@@ -144,7 +199,10 @@ class OagisHelper:
             for k, v in attrs.items():
                 new_elem.set(k, str(v))
 
-        return True
+        instance = OagisHelper()
+        instance._root = new_elem
+        instance._ns = self._ns
+        return instance
 
     def element_delete(self, xpath: str) -> bool:
         if not xpath or self._root is None or "/" not in xpath:
@@ -172,33 +230,41 @@ class OagisHelper:
         fields = fields or {}
         namespaces = namespaces or {}
 
-        root = ET.Element(f"{verb}{noun}", namespaces)
+        default_ns = namespaces.get("", "")
+        for prefix, uri in namespaces.items():
+            ET.register_namespace(prefix, uri)
 
-        app_area = ET.SubElement(root, "ApplicationArea")
+        def _tag(name):
+            return f"{{{default_ns}}}{name}" if default_ns else name
 
-        sender = ET.SubElement(app_area, "Sender")
-        ET.SubElement(sender, "LogicalID").text = str(fields.get("LogicalID") or "")
+        root = ET.Element(_tag(f"{verb}{noun}"))
+
+        app_area = ET.SubElement(root, _tag("ApplicationArea"))
+
+        sender = ET.SubElement(app_area, _tag("Sender"))
+        ET.SubElement(sender, _tag("LogicalID")).text = str(fields.get("LogicalID") or "")
 
         creation_dt = fields.get("CreationDateTime")
         if creation_dt is None:
             now = datetime.utcnow()
             creation_dt = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}"
-        ET.SubElement(app_area, "CreationDateTime").text = str(creation_dt)
+        ET.SubElement(app_area, _tag("CreationDateTime")).text = str(creation_dt)
 
-        ET.SubElement(app_area, "BODID").text = str(fields.get("BODID") or "")
+        ET.SubElement(app_area, _tag("BODID")).text = str(fields.get("BODID") or "")
 
-        data_area = ET.SubElement(root, "DataArea")
-        verb_elem = ET.SubElement(data_area, verb)
+        data_area = ET.SubElement(root, _tag("DataArea"))
+        verb_elem = ET.SubElement(data_area, _tag(verb))
 
-        ET.SubElement(verb_elem, "TenantID").text = str(fields.get("TenantID") or "")
-        ET.SubElement(verb_elem, "AccountingEntityID").text = str(fields.get("AccountingEntity") or "")
+        ET.SubElement(verb_elem, _tag("TenantID")).text = str(fields.get("TenantID") or "")
+        ET.SubElement(verb_elem, _tag("AccountingEntityID")).text = str(fields.get("AccountingEntity") or "")
 
         action_code = fields.get("actionCode", "Add")
-        action_criteria = ET.SubElement(verb_elem, "ActionCriteria")
-        ET.SubElement(action_criteria, "ActionExpression").set("actionCode", str(action_code))
+        action_criteria = ET.SubElement(verb_elem, _tag("ActionCriteria"))
+        ET.SubElement(action_criteria, _tag("ActionExpression")).set("actionCode", str(action_code))
 
-        ET.SubElement(data_area, noun)
+        ET.SubElement(data_area, _tag(noun))
 
         instance = cls()
         instance._root = root
+        instance._ns = default_ns or None
         return instance
